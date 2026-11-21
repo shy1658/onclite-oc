@@ -34,7 +34,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             bc bison build-essential flex libssl-dev libelf-dev \
-            zip unzip python3 binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi
+            zip unzip python3 device-tree-compiler \
+            binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
       - name: Clone LineageOS 21 kernel
         run: |
@@ -51,15 +52,20 @@ jobs:
       - name: Build Image.gz-dtb
         run: |
           export PATH="$PWD/tc/bin:$PATH"
+          # The in-tree dtc predates "-@" (CONFIG_BUILD_ARM64_DT_OVERLAY exports
+          # DTC_FLAGS := -@), so use the distro dtc instead.
+          dtc --version
           make -C kernel O=out ARCH=arm64 \
             CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            DTC_EXT=/usr/bin/dtc \
             onclite-perf_defconfig
           make -C kernel O=out ARCH=arm64 \
             CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            DTC_EXT=/usr/bin/dtc \
             -j"$(nproc)" Image.gz-dtb
 
       - name: Package AnyKernel3 zip
