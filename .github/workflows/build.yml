@@ -1,0 +1,95 @@
+name: build-onclite-oc
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "safe = 2.016 GHz + GPU 725 | high = 2.208 GHz + GPU 800 | max = 2.208 GHz @1.10V + GPU 825"
+        required: true
+        default: max
+        type: choice
+        options:
+          - max
+          - high
+          - safe
+          - mild
+          - extreme
+          - extreme-v
+      boot_url:
+        description: "optional: direct URL to stock boot.img or the LineageOS zip; empty = try the 2025-10-05 build"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout patcher
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential flex libssl-dev libelf-dev \
+            zip unzip python3 binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+      - name: Clone LineageOS 21 kernel
+        run: |
+          git clone --depth 1 --single-branch \
+            -b lineage-21 \
+            https://github.com/LineageOS/android_kernel_xiaomi_onclite.git kernel
+
+      - name: Apply overclock patches
+        run: python3 apply_oc.py kernel --level "${{ inputs.level }}"
+
+      - name: Fetch proton-clang
+        run: git clone --depth 1 https://github.com/kdrag0n/proton-clang.git tc
+
+      - name: Build Image.gz-dtb
+        run: |
+          export PATH="$PWD/tc/bin:$PATH"
+          make -C kernel O=out ARCH=arm64 \
+            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            onclite-perf_defconfig
+          make -C kernel O=out ARCH=arm64 \
+            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            -j"$(nproc)" Image.gz-dtb
+
+      - name: Fetch stock boot image
+        run: |
+          if [ -n "${{ inputs.boot_url }}" ]; then
+            curl -fL --retry 3 -o boot-source "${{ inputs.boot_url }}"
+          else
+            curl -fL --retry 3 -o boot-source \
+              "https://mirrorbits.lineageos.org/full/onclite/20251005/lineage-21.0-20251005-nightly-onclite-signed.zip"
+            echo "67ecb535b9b4ad574b4c9485d8ed973d19b6835af38a921eaf44eace6b257ea6  boot-source" | sha256sum -c -
+          fi
+          ls -lh boot-source
+
+      - name: Repack boot image with the OC kernel
+        run: |
+          python3 repack_boot.py \
+            boot-source \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            "boot-onclite-oc-${{ inputs.level }}.img"
+
+      - name: Upload boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-onclite-oc-${{ inputs.level }}
+          path: boot-onclite-oc-${{ inputs.level }}.img
+          if-no-files-found: error
+
+      - name: Upload raw kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image.gz-dtb-${{ inputs.level }}
+          path: kernel/out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: error
