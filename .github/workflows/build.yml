@@ -16,7 +16,7 @@ on:
           - extreme
           - extreme-v
       boot_url:
-        description: "optional: direct URL to stock boot.img or the LineageOS zip; empty = try the 2025-10-05 build"
+        description: "optional: direct URL to a stock boot.img (or ROM zip). When set, the run also produces a repacked boot .img"
         required: false
         default: ""
 
@@ -62,25 +62,38 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             -j"$(nproc)" Image.gz-dtb
 
-      - name: Fetch stock boot image
+      - name: Package AnyKernel3 zip
         run: |
-          if [ -n "${{ inputs.boot_url }}" ]; then
-            curl -fL --retry 3 -o boot-source "${{ inputs.boot_url }}"
-          else
-            curl -fL --retry 3 -o boot-source \
-              "https://mirrorbits.lineageos.org/full/onclite/20251005/lineage-21.0-20251005-nightly-onclite-signed.zip"
-            echo "67ecb535b9b4ad574b4c9485d8ed973d19b6835af38a921eaf44eace6b257ea6  boot-source" | sha256sum -c -
-          fi
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git ak3
+          cp anykernel.sh ak3/anykernel.sh
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb ak3/Image.gz-dtb
+          ( cd ak3 && zip -r9 "../onclite-oc-${{ inputs.level }}.zip" . -x ".git/*" "README.md" "*.zip" )
+          ls -lh "onclite-oc-${{ inputs.level }}.zip"
+
+      - name: Fetch stock boot image
+        if: inputs.boot_url != ''
+        run: |
+          curl -fL --retry 3 -o boot-source "${{ inputs.boot_url }}"
           ls -lh boot-source
 
       - name: Repack boot image with the OC kernel
+        if: inputs.boot_url != ''
         run: |
           python3 repack_boot.py \
             boot-source \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
             "boot-onclite-oc-${{ inputs.level }}.img"
+          ls -lh "boot-onclite-oc-${{ inputs.level }}.img"
+
+      - name: Upload AnyKernel3 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: onclite-oc-${{ inputs.level }}-zip
+          path: onclite-oc-${{ inputs.level }}.zip
+          if-no-files-found: error
 
       - name: Upload boot image
+        if: inputs.boot_url != ''
         uses: actions/upload-artifact@v4
         with:
           name: boot-onclite-oc-${{ inputs.level }}
