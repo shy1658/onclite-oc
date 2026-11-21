@@ -1,0 +1,7 @@
+work/
+*.img
+*.zip
+.oc-backup/
+.oc-state.json
+__pycache__/
+.test/
